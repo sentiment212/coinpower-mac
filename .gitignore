@@ -1,0 +1,4 @@
+node_modules/
+dist/
+icon.iconset/
+*.pre-*
