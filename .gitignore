@@ -2,3 +2,4 @@ node_modules/
 dist/
 icon.iconset/
 *.pre-*
+.DS_Store
