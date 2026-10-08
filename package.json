@@ -1,12 +1,13 @@
 {
   "name": "coinpower-mac",
-  "version": "1.0.0",
+  "version": "1.0.5",
   "description": "",
   "main": "main.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
     "start": "electron .",
-    "dist": "electron-builder --mac"
+    "dist": "APPLE_KEYCHAIN_PROFILE=CoinPowerNotary electron-builder --mac",
+    "dist:win": "electron-builder --win"
   },
   "keywords": [],
   "author": "",
@@ -19,23 +20,38 @@
   "build": {
     "appId": "nl.coinpower.mac",
     "productName": "CoinPower",
+    "electronLanguages": ["nl", "en"],
+    "compression": "maximum",
     "directories": {
       "output": "dist"
     },
     "files": [
       "main.js",
-      "icon.icns",
+      "preload.js",
+      "meldingsiconen/**",
       "package.json"
     ],
     "mac": {
       "icon": "icon.icns",
       "category": "public.app-category.finance",
-      "target": [
-        "dmg"
-      ]
+      "target": ["dmg"],
+      "hardenedRuntime": true,
+      "gatekeeperAssess": false,
+      "entitlements": "build/entitlements.mac.plist",
+      "entitlementsInherit": "build/entitlements.mac.plist",
+      "notarize": true
     },
     "dmg": {
       "title": "CoinPower"
+    },
+    "win": {
+      "icon": "icon.ico",
+      "target": ["nsis"]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "artifactName": "CoinPower-${version}-setup.${ext}"
     }
   }
 }
