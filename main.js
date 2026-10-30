@@ -2,8 +2,32 @@ const { app, BrowserWindow, Menu, Notification, ipcMain, shell, session } = requ
 const path = require('path');
 const fs = require('fs');
 
+// 30-10-2026 — GPU-fallback tegen het zwarte-scherm-probleem op Windows (Chromium-GPU-
+// compositing faalt op sommige Windows-machines; macOS/Metal raakt dit niet). Moet vóór elk
+// venster aangemaakt wordt staan. Raakt macOS niet anders dan dat ook daar hardware-
+// acceleratie uitstaat — geen platform-conditional nodig, dit is de brede, veilige fix.
+app.disableHardwareAcceleration();
+
 // Het venster onthouden zodat de meldingen-lus het naar voren kan halen.
 let hoofdVenster = null;
+
+// 30-10-2026 — zichtbare foutpagina i.p.v. stil zwart venster. Pure HTML-string → data:-URL,
+// geen netwerkverzoek nodig (werkt ook als het probleem zelf netwerk/DNS is). escapeHtml houdt
+// de foutbeschrijving (die van buiten komt, Chromium/het net) veilig als platte tekst.
+function escapeHtml(tekst) {
+  return String(tekst == null ? '' : tekst).replace(/[&<>"']/g, (c) => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+  })[c]);
+}
+function toonFoutPagina(venster, titel, boodschap) {
+  const html = '<!doctype html><html><head><meta charset="utf-8"><title>CoinPower</title>'
+    + '<style>body{background:#13101f;color:#eee;font:15px -apple-system,Segoe UI,sans-serif;'
+    + 'display:flex;align-items:center;justify-content:center;height:100vh;margin:0;padding:24px;'
+    + 'text-align:center;box-sizing:border-box}div{max-width:480px}h1{font-size:17px;margin:0 0 10px}'
+    + 'p{color:#bbb;line-height:1.5}</style></head><body><div>'
+    + '<h1>' + escapeHtml(titel) + '</h1><p>' + escapeHtml(boodschap) + '</p></div></body></html>';
+  venster.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent(html));
+}
 
 function maakVenster() {
   const venster = new BrowserWindow({
@@ -13,6 +37,7 @@ function maakVenster() {
     minHeight: 600,
     title: 'CoinPower',
     backgroundColor: '#13101f',
+    show: false,
     icon: path.join(__dirname, process.platform === 'darwin' ? 'icon.icns' : 'icon.ico'),
     ...(process.platform === 'darwin' ? { titleBarStyle: 'hiddenInset', trafficLightPosition: { x: 18, y: 13 } } : {}),
     webPreferences: {
@@ -26,11 +51,33 @@ function maakVenster() {
   hoofdVenster = venster;
   venster.on('closed', () => { if (hoofdVenster === venster) hoofdVenster = null; });
 
+  // 30-10-2026 — pas tonen als de eerste render klaar is (voorkomt een blanco flits).
+  // Lost het GPU-zwart-scherm-geval niet op, hoort er wel bij.
+  venster.once('ready-to-show', () => venster.show());
+
   // User-Agent marker zodat de webapp herkent dat 'ie binnen Electron draait.
   const huidigUA = venster.webContents.getUserAgent();
   venster.webContents.setUserAgent(huidigUA + ' CoinPowerMac/1.0.0');
 
   venster.loadURL('https://mijn.coinpower.nl');
+
+  // 30-10-2026 — ZICHTBARE foutafhandeling i.p.v. een stil zwart scherm.
+  //   did-fail-load: alleen het hoofdframe, en -3 (ABORTED) overslaan — dat is een normale
+  //   onderbroken navigatie (bv. een redirect), geen echte fout.
+  venster.webContents.on('did-fail-load', (_e, errorCode, errorDescription, _url, isMainFrame) => {
+    if (!isMainFrame || errorCode === -3) return;
+    console.error('[laden] mislukt:', errorCode, errorDescription);
+    toonFoutPagina(venster, 'Kon mijn.coinpower.nl niet laden',
+      'Fout ' + errorCode + ' — ' + errorDescription + '. Controleer je internetverbinding en herstart de app.');
+  });
+  // render-process-gone: de renderer is weg (crash/kill/oom). Reden loggen, kort melden, en
+  //   zelf opnieuw laden — zichtbaar in plaats van een zwart venster dat nergens op reageert.
+  venster.webContents.on('render-process-gone', (_e, details) => {
+    console.error('[renderer] weg:', details.reason);
+    toonFoutPagina(venster, 'CoinPower moest herstarten',
+      'De weergave stopte onverwacht (' + details.reason + '). Ik probeer het nu opnieuw te laden…');
+    setTimeout(() => { try { venster.loadURL('https://mijn.coinpower.nl'); } catch (_) { /* venster al dicht */ } }, 1500);
+  });
 
   // Externe links in de standaardbrowser openen
   venster.webContents.setWindowOpenHandler(({ url }) => {
